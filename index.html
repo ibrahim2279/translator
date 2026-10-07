@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>مترجم روسي ⇄ عربي</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--tx:#1a1d21;--mut:#6b7280;--ac:#2563eb;--bd:#d9dde3}
+@media (prefers-color-scheme:dark){:root{--bg:#111316;--card:#1b1e23;--tx:#eceff3;--mut:#9aa3ae;--ac:#5b8cff;--bd:#2c3139}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;padding:14px;max-width:640px;margin-inline:auto}
+h1{font-size:20px;margin:6px 0 12px;text-align:center}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:12px;margin-bottom:12px}
+.lbl{font-size:13px;color:var(--mut);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center}
+textarea{width:100%;min-height:120px;border:0;outline:0;resize:vertical;background:transparent;color:var(--tx);font:inherit;font-size:18px;line-height:1.6}
+.out{min-height:80px;font-size:18px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+button{font:inherit;font-size:16px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:12px;padding:12px 14px;cursor:pointer}
+button.main{width:100%;background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600;margin-bottom:12px}
+button.s{padding:2px 10px;font-size:13px}
+button:disabled{opacity:.6}
+.err{color:#d33;font-size:14px;margin-top:6px}
+.note{font-size:12px;color:var(--mut);text-align:center}
+</style>
+</head>
+<body>
+<h1>مترجم روسي ⇄ عربي</h1>
+<div class="card">
+  <div class="lbl"><span id="dirLbl">اكتب بالعربي أو الروسي</span><button class="s" id="clr">مسح</button></div>
+  <textarea id="inp" placeholder="اكتب أو الصق الرسالة هنا..."></textarea>
+</div>
+<button class="main" id="go">ترجم</button>
+<div class="card">
+  <div class="lbl"><span>الترجمة</span><button class="s" id="cp">نسخ</button></div>
+  <div class="out" id="out"></div>
+  <div id="prBox" hidden>
+    <div class="lbl" style="margin-top:12px"><span>النطق بالحروف العربية (تقريبي)</span></div>
+    <div class="out" id="pr" dir="rtl" style="min-height:0;color:var(--mut);font-size:16px"></div>
+  </div>
+  <div class="err" id="err"></div>
+</div>
+<div class="note" id="eng"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const isRu=s=>(s.match(/[\u0400-\u04FF]/g)||[]).length>(s.match(/[\u0600-\u06FF]/g)||[]).length;
+
+function upd(){
+  const v=$("inp").value.trim();
+  $("dirLbl").textContent=!v?"اكتب بالعربي أو الروسي":isRu(v)?"روسي ← عربي":"عربي ← روسي";
+  $("inp").dir=isRu(v)?"ltr":"rtl";
+}
+$("inp").addEventListener("input",upd);
+$("clr").onclick=()=>{$("inp").value="";$("out").textContent="";$("pr").textContent="";$("prBox").hidden=true;$("err").textContent="";upd()};
+$("cp").onclick=async()=>{
+  try{await navigator.clipboard.writeText($("out").textContent);$("cp").textContent="تم ✓"}catch(e){$("cp").textContent="حدد وانسخ"}
+  setTimeout(()=>$("cp").textContent="نسخ",1500);
+};
+
+// نطق الروسي بحروف عربية (تقريبي)
+const TR={а:"ا",б:"ب",в:"ڤ",г:"گ",д:"د",е:"يي",ё:"يو",ж:"ژ",з:"ز",и:"ي",й:"ي",к:"ك",л:"ل",м:"م",н:"ن",о:"و",п:"پ",р:"ر",с:"س",т:"ت",у:"و",ф:"ف",х:"خ",ц:"تس",ч:"تش",ш:"ش",щ:"شش",ъ:"",ы:"ي",ь:"",э:"ي",ю:"يو",я:"يا"};
+const translit=t=>[...t.toLowerCase()].map(c=>TR[c]!==undefined?TR[c]:c).join("");
+
+// قسّم النص لأجزاء (الحد الأقصى لكل طلب ~450 حرف)
+function chunks(t){
+  const parts=t.split(/(?<=[.!?؟\n])\s+/),res=[];let cur="";
+  for(const p of parts){
+    if((cur+" "+p).length>450&&cur){res.push(cur);cur=p}else cur=cur?cur+" "+p:p;
+  }
+  if(cur)res.push(cur);
+  return res.flatMap(c=>c.length>480?c.match(/.{1,450}/g):[c]);
+}
+
+async function myMemory(text,src,dst){
+  const out=[];
+  for(const c of chunks(text)){
+    const u="https://api.mymemory.translated.net/get?q="+encodeURIComponent(c)+"&langpair="+src+"|"+dst;
+    const r=await fetch(u);const d=await r.json();
+    if(d.responseStatus!=200)throw new Error(d.responseDetails||"api");
+    out.push(d.responseData.translatedText);
+  }
+  return out.join(" ");
+}
+
+async function chromeTr(text,src,dst){
+  if(!("Translator" in self))return null;
+  try{
+    const a=await Translator.availability({sourceLanguage:src,targetLanguage:dst});
+    if(a==="unavailable")return null;
+    const t=await Translator.create({sourceLanguage:src,targetLanguage:dst});
+    return await t.translate(text);
+  }catch(e){return null}
+}
+
+$("go").onclick=async()=>{
+  const txt=$("inp").value.trim();if(!txt)return;
+  const ru=isRu(txt),src=ru?"ru":"ar",dst=ru?"ar":"ru";
+  $("err").textContent="";$("out").textContent="";$("pr").textContent="";$("prBox").hidden=true;$("out").dir=ru?"rtl":"ltr";
+  $("go").disabled=true;$("go").textContent="جارٍ الترجمة...";
+  try{
+    let r=await chromeTr(txt,src,dst),eng="ترجمة المتصفح (أوفلاين)";
+    if(!r){r=await myMemory(txt,src,dst);eng="MyMemory"}
+    $("out").textContent=r;
+    if(!ru){$("pr").textContent=translit(r);$("prBox").hidden=false}
+    $("eng").textContent="المحرك: "+eng;
+  }catch(e){
+    $("err").textContent="فشلت الترجمة. اتأكد من النت، أو ممكن الحد اليومي خلص.";
+  }
+  $("go").disabled=false;$("go").textContent="ترجم";
+};
+</script>
+</body>
+</html>
